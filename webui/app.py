@@ -36,6 +36,17 @@ try:
     _LINGUA = True
 except ImportError:
     _LINGUA = False
+try:
+    from compressor.tbsa_layer import compress as tbsa_compress
+    _TBSA = True
+except ImportError:
+    _TBSA = False
+
+try:
+    from compressor.dlm_layer import compress as dlm_compress, decompress as dlm_decompress
+    _DLM = True
+except ImportError:
+    _DLM = False
 
 
 # ── App setup ──────────────────────────────────────────────────────────────
@@ -77,6 +88,8 @@ def status():
             "3": {"name": "Importance Filter",   "available": True,  "requires": "none"},
             "4": {"name": "Embedding Compress",  "available": _EMBED, "requires": "pip install sentence-transformers faiss-cpu"},
             "5": {"name": "Abstractive LLM",     "available": True,  "requires": "GROQ_API_KEY or GEMINI_API_KEY"},
+            "6": {"name": "TBSA Structural",      "available": True,  "requires": "none"},
+            "7": {"name": "DLM Lexicon Mapping",  "available": True,  "requires": "none"},
         },
         "backends": {
             "groq":   {"available": bool(os.getenv("GROQ_API_KEY")),   "model": GROQ_DEFAULT_MODEL},
@@ -240,6 +253,34 @@ def compress_endpoint():
             layer_stats.append({"layer": 5, "name": "Abstractive LLM",
                                  "skipped": True, "reason": str(e)[:200]})
 
+    # Layer 6: TBSA
+    if 6 in layers:
+        try:
+            t = time.perf_counter()
+            aggr = {"conservative": 0.3, "balanced": 0.6, "aggressive": 0.85}[mode]
+            r = tbsa_compress(current, aggressiveness=aggr)
+            current = r.compressed_text
+            layer_stats.append({"layer": 6, "name": "TBSA Structural",
+                "input": r.original_tokens, "output": r.compressed_tokens,
+                "ratio": r.compression_ratio, "ms": round((time.perf_counter()-t)*1000)})
+        except Exception as e:
+            layer_stats.append({"layer": 6, "name": "TBSA Structural",
+                "skipped": True, "reason": str(e)[:150]})
+
+    # Layer 7: DLM
+    if 7 in layers:
+        try:
+            t = time.perf_counter()
+            r = dlm_compress(current)
+            current = r.compressed_text
+            layer_stats.append({"layer": 7, "name": "DLM Lexicon Mapping",
+                "input": r.original_tokens, "output": r.compressed_tokens,
+                "ratio": r.compression_ratio, "replacements": r.replacements_made,
+                "ms": round((time.perf_counter()-t)*1000)})
+        except Exception as e:
+            layer_stats.append({"layer": 7, "name": "DLM Lexicon Mapping",
+                "skipped": True, "reason": str(e)[:150]})
+
     final_tokens = _tokens(current)
     return jsonify({
         "compressed": current,
@@ -335,3 +376,4 @@ if __name__ == "__main__":
     print(f"   Upload: up to 10 MB\n")
 
     app.run(host=args.host, port=args.port, debug=args.debug)
+# TBSA and DLM imports appended
