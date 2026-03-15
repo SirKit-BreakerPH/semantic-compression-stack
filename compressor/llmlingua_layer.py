@@ -82,6 +82,7 @@ def compress(
     if question:
         kwargs["question"] = question
 
+    text = preprocess(text)
     result = compressor.compress_prompt(text, **kwargs)
 
     compressed = result["compressed_prompt"]
@@ -107,3 +108,11 @@ def decompress_hint(compressed: str) -> str:
         "Reconstruct the full, natural-language version, inferring implied "
         "words and grammatical connectors:\n\n" + compressed
     )
+
+
+def preprocess(text: str) -> str:
+    """Remove separator lines and blank noise before compression."""
+    import re
+    text = re.sub(r'-{3,}', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
