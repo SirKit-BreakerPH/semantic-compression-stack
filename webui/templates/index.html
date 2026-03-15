@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Semantic Compression Stack</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:         #0a0b0e;
+  --surface:    #111318;
+  --border:     #1e2230;
+  --border-hi:  #2e3450;
+  --text:       #c8cdd8;
+  --text-dim:   #565d78;
+  --text-bright:#eef0f5;
+  --accent:     #4af0a0;
+  --accent-dim: #1a5c3e;
+  --accent2:    #5b8aff;
+  --accent2-dim:#1a2d6e;
+  --warn:       #f0b44a;
+  --warn-dim:   #4a3510;
+  --danger:     #f05a5a;
+  --mono:       'JetBrains Mono', monospace;
+  --sans:       'Syne', sans-serif;
+  --radius:     6px;
+  --transition: 160ms ease;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100vh;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0 14px;
+  border-bottom: 1px solid var(--border);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.logo {
+  font-family: var(--sans);
+  font-weight: 800;
+  font-size: 17px;
+  color: var(--text-bright);
+  letter-spacing: -.3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.logo-mark {
+  width: 28px; height: 28px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-family: var(--mono); font-weight: 600; color: #000;
+}
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px;
+  border-radius: 100px;
+  font-size: 11px; font-weight: 500; letter-spacing: .3px;
+  border: 1px solid;
+}
+.badge-green { color: var(--accent); border-color: var(--accent-dim); background: #0b1f14; }
+.badge-blue  { color: var(--accent2); border-color: var(--accent2-dim); background: #0c1424; }
+.badge-dim   { color: var(--text-dim); border-color: var(--border); }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ── Main 2-col layout ──────────────────────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 0;
+  padding: 20px 0;
+  align-items: start;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: sticky;
+  top: 20px;
+}
+.section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+/* ── Layer toggles ──────────────────────────────────────────────────────── */
+.layer-list { display: flex; flex-direction: column; gap: 6px; }
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  user-select: none;
+}
+.layer-item:hover { border-color: var(--border-hi); background: #111620; }
+.layer-item.active {
+  border-color: var(--accent-dim);
+  background: #0b1f14;
+}
+.layer-item.active .layer-num { color: var(--accent); }
+.layer-item.unavailable { opacity: .4; cursor: not-allowed; }
+.layer-num {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-dim);
+  width: 18px; flex-shrink: 0;
+}
+.layer-info { flex: 1; min-width: 0; }
+.layer-name { font-size: 12px; color: var(--text-bright); }
+.layer-desc { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer-check {
+  width: 16px; height: 16px;
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  transition: all var(--transition);
+}
+.layer-item.active .layer-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+}
+
+/* ── Mode selector ──────────────────────────────────────────────────────── */
+.mode-tabs {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.mode-tab {
+  flex: 1; padding: 7px 4px; text-align: center;
+  font-size: 11px; font-weight: 500; cursor: pointer;
+  color: var(--text-dim);
+  transition: all var(--transition);
+  border-right: 1px solid var(--border);
+}
+.mode-tab:last-child { border-right: none; }
+.mode-tab:hover { color: var(--text); background: #111620; }
+.mode-tab.active { color: var(--text-bright); background: var(--surface); }
+.mode-tab.active.conservative { color: var(--accent2); }
+.mode-tab.active.balanced     { color: var(--accent); }
+.mode-tab.active.aggressive   { color: var(--warn); }
+
+/* ── Backend section ─────────────────────────────────────────────────────── */
+.api-fields { display: flex; flex-direction: column; gap: 8px; }
+.field-group { display: flex; flex-direction: column; gap: 4px; }
+.field-label {
+  font-size: 10px; color: var(--text-dim); font-weight: 500; letter-spacing: .3px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.field-label a {
+  color: var(--accent2);
+  text-decoration: none; font-size: 10px;
+  opacity: .8;
+}
+.field-label a:hover { opacity: 1; text-decoration: underline; }
+input[type="text"], input[type="password"] {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+input:focus { border-color: var(--accent2); }
+input.has-value { border-color: var(--accent-dim); color: var(--accent); }
+
+.backend-select {
+  display: flex; gap: 4px; margin-top: 2px;
+}
+.backend-btn {
+  flex: 1; padding: 5px 4px; text-align: center;
+  font-size: 10px; font-weight: 600; letter-spacing: .4px;
+  cursor: pointer; border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  transition: all var(--transition);
+  font-family: var(--mono);
+  background: none;
+}
+.backend-btn:hover { border-color: var(--border-hi); color: var(--text); }
+.backend-btn.active { border-color: var(--accent-dim); background: #0b1f14; color: var(--accent); }
+
+/* ── Content area ────────────────────────────────────────────────────────── */
+.content { padding-left: 24px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Textarea panels ─────────────────────────────────────────────────────── */
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color var(--transition);
+}
+.panel:focus-within { border-color: var(--border-hi); }
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+.panel-title {
+  font-size: 11px; font-weight: 600; color: var(--text-bright); letter-spacing: .3px;
+}
+.panel-meta {
+  font-size: 10px; color: var(--text-dim);
+  display: flex; align-items: center; gap: 8px;
+}
+.token-count { color: var(--accent2); font-weight: 500; }
+textarea {
+  width: 100%; min-height: 180px;
+  background: var(--bg);
+  border: none; outline: none; resize: vertical;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 14px;
+}
+textarea::placeholder { color: var(--text-dim); }
+
+/* ── Action bar ──────────────────────────────────────────────────────────── */
+.action-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 18px;
+  border-radius: var(--radius);
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  cursor: pointer; border: none; outline: none;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #000;
+}
+.btn-primary:hover:not(:disabled) { background: #6affb8; transform: translateY(-1px); }
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--border-hi); color: var(--text-bright); }
+.btn-ghost {
+  background: none; color: var(--text-dim);
+  border: 1px solid transparent;
+  padding: 9px 12px;
+}
+.btn-ghost:hover { color: var(--text); border-color: var(--border); }
+.btn:disabled { opacity: .4; cursor: not-allowed; transform: none !important; }
+.btn-icon { font-size: 14px; }
+
+/* ── Stats row ───────────────────────────────────────────────────────────── */
+.stats-row {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  animation: fadeIn .3s ease;
+}
+.stat-chip {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.stat-chip-label { font-size: 9px; color: var(--text-dim); letter-spacing: .8px; text-transform: uppercase; }
+.stat-chip-value { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+.stat-chip-value.green { color: var(--accent); }
+.stat-chip-value.blue  { color: var(--accent2); }
+.stat-chip-value.warn  { color: var(--warn); }
+.stat-divider { width: 1px; background: var(--border); align-self: stretch; }
+
+/* ── Layer breakdown ─────────────────────────────────────────────────────── */
+.layer-breakdown {
+  display: flex; flex-direction: column; gap: 4px;
+  animation: fadeIn .3s ease;
+}
+.layer-row {
+  display: grid;
+  grid-template-columns: 28px 140px 1fr 60px 50px;
+  gap: 8px; align-items: center;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+}
+.layer-row-num { color: var(--text-dim); font-size: 10px; }
+.layer-row-name { color: var(--text); }
+.layer-row-bar-wrap {
+  height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+}
+.layer-row-bar {
+  height: 100%; background: var(--accent); border-radius: 2px;
+  transition: width .5s ease;
+}
+.layer-row-ratio { color: var(--accent); text-align: right; font-weight: 600; }
+.layer-row-ms { color: var(--text-dim); text-align: right; }
+.layer-row.skipped { opacity: .4; }
+.layer-row.skipped .layer-row-name::after { content: " (skipped)"; color: var(--warn); }
+
+/* ── Buttons inside panel header ─────────────────────────────────────────── */
+.icon-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 14px; padding: 2px 6px;
+  border-radius: 4px; transition: all var(--transition);
+  font-family: var(--mono);
+}
+.icon-btn:hover { color: var(--text-bright); background: var(--border); }
+
+/* ── Spinner ─────────────────────────────────────────────────────────────── */
+.spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+/* ── Error / info banner ─────────────────────────────────────────────────── */
+.banner {
+  padding: 10px 14px; border-radius: var(--radius);
+  font-size: 12px; border: 1px solid;
+  animation: fadeIn .25s ease;
+}
+.banner-error  { background: #1e0f0f; border-color: #5a2020; color: #f08080; }
+.banner-info   { background: #0c1424; border-color: var(--accent2-dim); color: var(--accent2); }
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10px; color: var(--text-dim);
+}
+footer a { color: var(--accent2); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  main { grid-template-columns: 1fr; }
+  .sidebar { border-right: none; border-bottom: 1px solid var(--border); padding-right: 0; padding-bottom: 20px; position: static; }
+  .content { padding-left: 0; }
+  .layer-row { grid-template-columns: 24px 1fr 50px 40px; }
+  .layer-row-bar-wrap { display: none; }
+}
+
+/* ── Tab system ──────────────────────────────────────────────────────────── */
+.tabs { display: flex; border-bottom: 1px solid var(--border); gap: 0; margin-bottom: 16px; }
+.tab {
+  padding: 8px 16px; font-size: 12px; cursor: pointer;
+  color: var(--text-dim); border-bottom: 2px solid transparent;
+  transition: all var(--transition); margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-mark">SZ</div>
+    Semantic Zip
+  </div>
+  <div class="badges" id="status-badges">
+    <span class="badge badge-green" id="badge-l1">● L1 Skeleton</span>
+    <span class="badge badge-green" id="badge-l3">● L3 Filter</span>
+    <span class="badge badge-dim"   id="badge-l2">○ LLMLingua</span>
+    <span class="badge badge-dim"   id="badge-l4">○ Embeddings</span>
+    <span class="badge badge-dim"   id="badge-l5">○ LLM (L5)</span>
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+
+    <div>
+      <div class="section-label">Layers</div>
+      <div class="layer-list" id="layer-list">
+        <div class="layer-item active" data-layer="1">
+          <span class="layer-num">L1</span>
+          <div class="layer-info">
+            <div class="layer-name">Structural Skeleton</div>
+            <div class="layer-desc">AST + prose extraction</div>
+          </div>
+          <div class="layer-check">✓</div>
+        </div>
+        <div class="layer-item" data-layer="2" id="layer-item-2">
+          <span class="layer-num">L2</span>
+          <div class="layer-info">
+            <div class="layer-name">LLMLingua</div>
+            <div class="layer-desc">Perplexity-based pruning</div>
+          </div>
+          <div class="layer-check"></div>
+        </div>
+        <div class="layer-item active" data-layer="3">
+          <span class="layer-num">L3</span>
+          <div class="layer-info">
+            <div class="layer-name">Importance Filter</div>
+            <div class="layer-desc">TF-IDF sentence scoring</div>
+          </div>
+          <div class="layer-check">✓</div>
+        </div>
+        <div class="layer-item" data-layer="4" id="layer-item-4">
+          <span class="layer-num">L4</span>
+          <div class="layer-info">
+            <div class="layer-name">Embedding Compress</div>
+            <div class="layer-desc">Sentence vectors + PCA</div>
+          </div>
+          <div class="layer-check"></div>
+        </div>
+        <div class="layer-item" data-layer="5">
+          <span class="layer-num">L5</span>
+          <div class="layer-info">
+            <div class="layer-name">Abstractive LLM</div>
+            <div class="layer-desc">Groq / Gemini / local</div>
+          </div>
+          <div class="layer-check"></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Mode</div>
+      <div class="mode-tabs">
+        <div class="mode-tab conservative" data-mode="conservative">Safe</div>
+        <div class="mode-tab balanced active" data-mode="balanced">Balanced</div>
+        <div class="mode-tab aggressive" data-mode="aggressive">Max</div>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:6px;line-height:1.5" id="mode-hint">
+        Keep 60% sentences · L5 target 35% · Good quality/ratio trade-off
+      </div>
+    </div>
+
+    <div id="api-section">
+      <div class="section-label">Free API Keys (optional — Layer 5)</div>
+      <div class="api-fields">
+        <div class="field-group">
+          <div class="field-label">
+            GROQ API KEY
+            <a href="https://console.groq.com" target="_blank">Get free →</a>
+          </div>
+          <input type="password" id="groq-key" placeholder="gsk_…" autocomplete="off">
+        </div>
+        <div class="field-group">
+          <div class="field-label">
+            GEMINI API KEY
+            <a href="https://aistudio.google.com/app/apikey" target="_blank">Get free →</a>
+          </div>
+          <input type="password" id="gemini-key" placeholder="AIza…" autocomplete="off">
+        </div>
+        <div>
+          <div class="section-label" style="margin-bottom:6px">Backend priority</div>
+          <div class="backend-select">
+            <button class="backend-btn active" data-backend="auto">auto</button>
+            <button class="backend-btn" data-backend="groq">groq</button>
+            <button class="backend-btn" data-backend="gemini">gemini</button>
+            <button class="backend-btn" data-backend="hf">local</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--text-dim);line-height:1.5">
+          Keys stay in your browser. Never sent except to the selected API.
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- Content -->
+  <div class="content">
+
+    <div class="tabs">
+      <div class="tab active" data-tab="compress">Compress</div>
+      <div class="tab" data-tab="decompress">Reconstruct</div>
+      <div class="tab" data-tab="benchmark">Benchmark</div>
+    </div>
+
+    <!-- ── COMPRESS TAB ───────────────────────────────────────────────── -->
+    <div class="tab-panel active" id="tab-compress">
+
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">INPUT</span>
+          <div class="panel-meta">
+            <span id="input-tokens" class="token-count">0 tokens</span>
+            <button class="icon-btn" onclick="clearInput()" title="Clear">✕</button>
+            <button class="icon-btn" onclick="loadSample()" title="Load sample">⊕ sample</button>
+          </div>
+        </div>
+        <textarea id="input-text"
+          placeholder="Paste your text here — documents, code, RAG context, logs…"
+          oninput="updateInputCount()"></textarea>
+      </div>
+
+      <div class="action-bar">
+        <button class="btn btn-primary" onclick="runCompress()" id="compress-btn">
+          <span class="btn-icon">▶</span> Compress
+        </button>
+        <button class="btn btn-ghost" onclick="copyOutput()" id="copy-btn" style="display:none">
+          ⊡ Copy output
+        </button>
+        <button class="btn btn-ghost" onclick="sendToReconstruct()" id="send-btn" style="display:none">
+          ↩ Reconstruct
+        </button>
+        <span id="compress-error"></span>
+      </div>
+
+      <div id="compress-stats" style="display:none"></div>
+      <div id="layer-breakdown" style="display:none"></div>
+
+      <div class="panel" id="output-panel" style="display:none">
+        <div class="panel-header">
+          <span class="panel-title">COMPRESSED OUTPUT</span>
+          <div class="panel-meta">
+            <span id="output-tokens" class="token-count"></span>
+            <span id="output-ratio" style="color:var(--accent);font-weight:600"></span>
+          </div>
+        </div>
+        <textarea id="output-text" readonly style="color:var(--accent);"></textarea>
+      </div>
+
+    </div>
+
+    <!-- ── RECONSTRUCT TAB ────────────────────────────────────────────── -->
+    <div class="tab-panel" id="tab-decompress">
+
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">COMPRESSED INPUT</span>
+          <div class="panel-meta">
+            <span id="recon-input-tokens" class="token-count">0 tokens</span>
+          </div>
+        </div>
+        <textarea id="recon-input"
+          placeholder="Paste compressed text to reconstruct…"
+          oninput="updateReconCount()"></textarea>
+      </div>
+
+      <div class="action-bar">
+        <button class="btn btn-primary" onclick="runReconstruct()" id="recon-btn">
+          <span class="btn-icon">↩</span> Reconstruct
+        </button>
+        <span id="recon-error"></span>
+      </div>
+
+      <div id="recon-stats" style="display:none"></div>
+
+      <div class="panel" id="recon-output-panel" style="display:none">
+        <div class="panel-header">
+          <span class="panel-title">RECONSTRUCTED OUTPUT</span>
+          <div class="panel-meta">
+            <span id="recon-output-tokens" class="token-count"></span>
+            <span id="recon-model" style="color:var(--accent2)"></span>
+          </div>
+        </div>
+        <textarea id="recon-output" readonly></textarea>
+      </div>
+
+    </div>
+
+    <!-- ── BENCHMARK TAB ──────────────────────────────────────────────── -->
+    <div class="tab-panel" id="tab-benchmark">
+
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">TEXT TO BENCHMARK</span>
+          <div class="panel-meta">
+            <span id="bench-tokens" class="token-count">0 tokens</span>
+            <button class="icon-btn" onclick="loadSampleBench()">⊕ sample</button>
+          </div>
+        </div>
+        <textarea id="bench-text"
+          placeholder="Paste text to benchmark compression across all modes…"
+          oninput="updateBenchCount()"
+          style="min-height:120px"></textarea>
+      </div>
+
+      <div class="action-bar">
+        <button class="btn btn-primary" onclick="runBenchmark()" id="bench-btn">
+          <span class="btn-icon">≡</span> Run Benchmark
+        </button>
+        <span id="bench-error"></span>
+      </div>
+
+      <div id="bench-results" style="display:none"></div>
+
+    </div>
+
+  </div><!-- /content -->
+</main>
+
+<footer>
+  <span>Semantic Compression Stack · Layers 1–5 · Groq + Gemini free tier</span>
+  <span>
+    <a href="https://console.groq.com" target="_blank">Groq Console</a> ·
+    <a href="https://aistudio.google.com" target="_blank">Gemini Studio</a> ·
+    <a href="https://github.com/microsoft/LLMLingua" target="_blank">LLMLingua</a>
+  </span>
+</footer>
+
+</div><!-- /shell -->
+
+<script>
+const API = '';  // relative — works when served by Flask
+
+// ── State ──────────────────────────────────────────────────────────────────
+let activeLayers = new Set([1, 3]);
+let activeMode   = 'balanced';
+let activeBackend = 'auto';
+
+const SAMPLE = `# Transformer Architecture Overview
+
+The transformer architecture, introduced in "Attention Is All You Need" (Vaswani et al., 2017),
+fundamentally changed NLP by replacing recurrent networks with self-attention mechanisms.
+The core innovation: attention alone, without recurrence or convolution, was sufficient
+for high-quality sequence modeling.
+
+\`\`\`python
+class MultiHeadAttention(nn.Module):
+    """Multi-head scaled dot-product attention."""
+    def __init__(self, d_model, num_heads, dropout=0.1):
+        super().__init__()
+        self.d_k = d_model // num_heads
+        self.num_heads = num_heads
+        self.w_q = nn.Linear(d_model, d_model)
+        self.w_k = nn.Linear(d_model, d_model)
+        self.w_v = nn.Linear(d_model, d_model)
+        self.w_o = nn.Linear(d_model, d_model)
+
+    def forward(self, query, key, value, mask=None):
+        batch_size = query.size(0)
+        q = self.w_q(query).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        k = self.w_k(key).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        v = self.w_v(value).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, -1e9)
+        weights = F.softmax(scores, dim=-1)
+        x = torch.matmul(weights, v).transpose(1, 2).contiguous()
+        return self.w_o(x.view(batch_size, -1, self.num_heads * self.d_k))
+\`\`\`
+
+The model achieved 28.4 BLEU on WMT 2014 English-German, an improvement of 2+ BLEU over the
+previous best results. Training cost was approximately $30 on 8 P100 GPUs for 12 hours.
+This transformer spawned BERT, GPT, PaLM, and virtually all modern NLP systems.`;
+
+// ── Status check ───────────────────────────────────────────────────────────
+async function checkStatus() {
+  try {
+    const r = await fetch(`${API}/api/status`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const l2 = data.layers['2'];
+    const l4 = data.layers['4'];
+    if (!l2.available) {
+      document.getElementById('layer-item-2').classList.add('unavailable');
+      document.getElementById('badge-l2').textContent = '○ LLMLingua';
+    } else {
+      document.getElementById('badge-l2').className = 'badge badge-green';
+      document.getElementById('badge-l2').textContent = '● LLMLingua';
+    }
+    if (!l4.available) {
+      document.getElementById('layer-item-4').classList.add('unavailable');
+    } else {
+      document.getElementById('badge-l4').className = 'badge badge-green';
+      document.getElementById('badge-l4').textContent = '● Embeddings';
+    }
+    if (data.backends.groq.available || data.backends.gemini.available) {
+      document.getElementById('badge-l5').className = 'badge badge-green';
+      document.getElementById('badge-l5').textContent = '● LLM (L5)';
+    }
+  } catch (_) {}
+}
+checkStatus();
+
+// ── Layer toggles ─────────────────────────────────────────────────────────
+document.querySelectorAll('.layer-item').forEach(el => {
+  el.addEventListener('click', () => {
+    if (el.classList.contains('unavailable')) return;
+    const layer = parseInt(el.dataset.layer);
+    if (activeLayers.has(layer)) {
+      activeLayers.delete(layer);
+      el.classList.remove('active');
+      el.querySelector('.layer-check').textContent = '';
+    } else {
+      activeLayers.add(layer);
+      el.classList.add('active');
+      el.querySelector('.layer-check').textContent = '✓';
+    }
+  });
+});
+
+// ── Mode tabs ─────────────────────────────────────────────────────────────
+const modeHints = {
+  conservative: 'Keep 75% sentences · L5 target 50% · Best quality, ~3–5× compression',
+  balanced:     'Keep 60% sentences · L5 target 35% · Good quality/ratio trade-off',
+  aggressive:   'Keep 40% sentences · L5 target 20% · Max compression, some quality loss',
+};
+document.querySelectorAll('.mode-tab').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    activeMode = el.dataset.mode;
+    document.getElementById('mode-hint').textContent = modeHints[activeMode];
+  });
+});
+
+// ── Backend buttons ───────────────────────────────────────────────────────
+document.querySelectorAll('.backend-btn').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.backend-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    activeBackend = el.dataset.backend;
+  });
+});
+
+// ── API key input styling ─────────────────────────────────────────────────
+['groq-key', 'gemini-key'].forEach(id => {
+  document.getElementById(id).addEventListener('input', e => {
+    e.target.classList.toggle('has-value', e.target.value.length > 0);
+  });
+});
+
+// ── Tabs ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById(`tab-${el.dataset.tab}`).classList.add('active');
+  });
+});
+
+// ── Token counting ─────────────────────────────────────────────────────────
+function countTokens(text) {
+  return Math.ceil(text.trim().split(/\s+/).filter(Boolean).length * 1.3);
+}
+function updateInputCount() {
+  const t = document.getElementById('input-text').value;
+  document.getElementById('input-tokens').textContent = `${countTokens(t).toLocaleString()} tokens`;
+}
+function updateReconCount() {
+  const t = document.getElementById('recon-input').value;
+  document.getElementById('recon-input-tokens').textContent = `${countTokens(t).toLocaleString()} tokens`;
+}
+function updateBenchCount() {
+  const t = document.getElementById('bench-text').value;
+  document.getElementById('bench-tokens').textContent = `${countTokens(t).toLocaleString()} tokens`;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function setLoading(btnId, loading, label) {
+  const btn = document.getElementById(btnId);
+  btn.disabled = loading;
+  btn.innerHTML = loading
+    ? `<span class="spinner"></span> ${label}`
+    : btn.dataset.orig || btn.innerHTML;
+  if (!loading && btn.dataset.orig) btn.innerHTML = btn.dataset.orig;
+}
+function showError(elId, msg) {
+  const el = document.getElementById(elId);
+  el.innerHTML = msg ? `<div class="banner banner-error">${msg}</div>` : '';
+}
+
+function loadSample() {
+  document.getElementById('input-text').value = SAMPLE;
+  updateInputCount();
+}
+function loadSampleBench() {
+  document.getElementById('bench-text').value = SAMPLE;
+  updateBenchCount();
+}
+function clearInput() {
+  document.getElementById('input-text').value = '';
+  updateInputCount();
+  document.getElementById('output-panel').style.display = 'none';
+  document.getElementById('compress-stats').style.display = 'none';
+  document.getElementById('layer-breakdown').style.display = 'none';
+  document.getElementById('copy-btn').style.display = 'none';
+  document.getElementById('send-btn').style.display = 'none';
+}
+function copyOutput() {
+  const text = document.getElementById('output-text').value;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => btn.textContent = '⊡ Copy output', 1500);
+  });
+}
+function sendToReconstruct() {
+  const text = document.getElementById('output-text').value;
+  document.getElementById('recon-input').value = text;
+  updateReconCount();
+  document.querySelector('[data-tab="decompress"]').click();
+}
+
+// ── Compress ───────────────────────────────────────────────────────────────
+async function runCompress() {
+  const text = document.getElementById('input-text').value.trim();
+  if (!text) { showError('compress-error', 'Please enter some text first.'); return; }
+  showError('compress-error', '');
+
+  const btn = document.getElementById('compress-btn');
+  btn.dataset.orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Compressing…';
+
+  try {
+    const resp = await fetch(`${API}/api/compress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        layers: [...activeLayers],
+        mode: activeMode,
+        backend: activeBackend,
+        groq_key:   document.getElementById('groq-key').value || undefined,
+        gemini_key: document.getElementById('gemini-key').value || undefined,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showError('compress-error', data.error || 'Server error'); return; }
+
+    // Stats bar
+    const statsEl = document.getElementById('compress-stats');
+    statsEl.style.display = 'flex';
+    statsEl.className = 'stats-row';
+    statsEl.innerHTML = `
+      <div class="stat-chip">
+        <span class="stat-chip-label">Original</span>
+        <span class="stat-chip-value blue">${data.original_tokens.toLocaleString()}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Compressed</span>
+        <span class="stat-chip-value">${data.final_tokens.toLocaleString()}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Ratio</span>
+        <span class="stat-chip-value green">${data.total_ratio}×</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Saved</span>
+        <span class="stat-chip-value ${data.saved_pct > 50 ? 'green' : ''}">${data.saved_pct}%</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Time</span>
+        <span class="stat-chip-value">${data.total_ms}ms</span>
+      </div>`;
+
+    // Layer breakdown
+    const bdEl = document.getElementById('layer-breakdown');
+    bdEl.style.display = 'block';
+    bdEl.innerHTML = data.layer_stats.map(s => {
+      if (s.skipped) return `<div class="layer-row skipped">
+        <span class="layer-row-num">L${s.layer}</span>
+        <span class="layer-row-name">${s.name}</span>
+        <div class="layer-row-bar-wrap"><div class="layer-row-bar" style="width:0%"></div></div>
+        <span class="layer-row-ratio">—</span>
+        <span class="layer-row-ms">—</span>
+      </div>`;
+      const pct = s.ratio ? Math.min(100, (1 - 1/s.ratio) * 100) : 0;
+      return `<div class="layer-row">
+        <span class="layer-row-num">L${s.layer}</span>
+        <span class="layer-row-name">${s.name}</span>
+        <div class="layer-row-bar-wrap"><div class="layer-row-bar" style="width:${pct.toFixed(0)}%"></div></div>
+        <span class="layer-row-ratio">${s.ratio ? s.ratio+'×' : '—'}</span>
+        <span class="layer-row-ms">${s.ms || 0}ms</span>
+      </div>`;
+    }).join('');
+
+    // Output
+    document.getElementById('output-text').value = data.compressed;
+    document.getElementById('output-tokens').textContent = `${data.final_tokens.toLocaleString()} tokens`;
+    document.getElementById('output-ratio').textContent = `${data.total_ratio}× compression`;
+    document.getElementById('output-panel').style.display = 'block';
+    document.getElementById('copy-btn').style.display = 'inline-flex';
+    document.getElementById('send-btn').style.display = 'inline-flex';
+
+  } catch (err) {
+    showError('compress-error', `Request failed: ${err.message}. Is the Flask server running?`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = btn.dataset.orig;
+  }
+}
+
+// ── Reconstruct ────────────────────────────────────────────────────────────
+async function runReconstruct() {
+  const text = document.getElementById('recon-input').value.trim();
+  if (!text) { showError('recon-error', 'Paste compressed text first.'); return; }
+  showError('recon-error', '');
+
+  const btn = document.getElementById('recon-btn');
+  btn.dataset.orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Reconstructing…';
+
+  try {
+    const resp = await fetch(`${API}/api/decompress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text, backend: activeBackend,
+        groq_key:   document.getElementById('groq-key').value || undefined,
+        gemini_key: document.getElementById('gemini-key').value || undefined,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showError('recon-error', data.error || 'Server error'); return; }
+
+    const statsEl = document.getElementById('recon-stats');
+    statsEl.style.display = 'flex';
+    statsEl.className = 'stats-row';
+    statsEl.innerHTML = `
+      <div class="stat-chip">
+        <span class="stat-chip-label">Input tokens</span>
+        <span class="stat-chip-value blue">${data.input_tokens.toLocaleString()}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Restored tokens</span>
+        <span class="stat-chip-value green">${data.output_tokens.toLocaleString()}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Expansion</span>
+        <span class="stat-chip-value">${data.expansion_ratio}×</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Model</span>
+        <span class="stat-chip-value" style="font-size:11px">${data.model}</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-chip">
+        <span class="stat-chip-label">Time</span>
+        <span class="stat-chip-value">${data.ms}ms</span>
+      </div>`;
+
+    document.getElementById('recon-output').value = data.reconstructed;
+    document.getElementById('recon-output-tokens').textContent = `${data.output_tokens.toLocaleString()} tokens`;
+    document.getElementById('recon-model').textContent = data.backend;
+    document.getElementById('recon-output-panel').style.display = 'block';
+
+  } catch (err) {
+    showError('recon-error', `Request failed: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = btn.dataset.orig;
+  }
+}
+
+// ── Benchmark ──────────────────────────────────────────────────────────────
+async function runBenchmark() {
+  const text = document.getElementById('bench-text').value.trim();
+  if (!text) { showError('bench-error', 'Paste text to benchmark.'); return; }
+  showError('bench-error', '');
+
+  const btn = document.getElementById('bench-btn');
+  btn.dataset.orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Benchmarking…';
+
+  try {
+    const resp = await fetch(`${API}/api/benchmark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showError('bench-error', data.error); return; }
+
+    const modeColors = { conservative: 'var(--accent2)', balanced: 'var(--accent)', aggressive: 'var(--warn)' };
+    const el = document.getElementById('bench-results');
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${data.results.map(r => `
+          <div style="display:grid;grid-template-columns:110px 1fr 70px 70px 50px 60px;gap:12px;align-items:center;
+               padding:10px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface)">
+            <span style="color:${modeColors[r.mode]};font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px">${r.mode}</span>
+            <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:${r.saved_pct}%;background:${modeColors[r.mode]};border-radius:3px;transition:width .6s ease"></div>
+            </div>
+            <span style="color:var(--text-dim);font-size:11px">${r.original_tokens.toLocaleString()} tok</span>
+            <span style="color:var(--text);font-size:11px">→ ${r.final_tokens.toLocaleString()}</span>
+            <span style="color:${modeColors[r.mode]};font-weight:700">${r.ratio}×</span>
+            <span style="color:var(--text-dim);font-size:10px">${r.ms}ms</span>
+          </div>
+        `).join('')}
+      </div>`;
+  } catch (err) {
+    showError('bench-error', `Request failed: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = btn.dataset.orig;
+  }
+}
+</script>
+</body>
+</html>
