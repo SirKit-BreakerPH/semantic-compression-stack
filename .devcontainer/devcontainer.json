@@ -4,14 +4,18 @@
   "features": {
     "ghcr.io/devcontainers/features/rust:1": {}
   },
-  "postCreateCommand": "pip install -r requirements.txt",
+  "postCreateCommand": "pip install -r requirements.txt && pip install flask flask-cors && python3 -c \"from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2'); from llmlingua import PromptCompressor; PromptCompressor('microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank', use_llmlingua2=True, device_map='cpu')\" && echo 'All models cached'",
+  "postStartCommand": "bash -c 'source ~/.bashrc; nohup python webui/app.py --host 0.0.0.0 --port 5000 > /tmp/webui.log 2>&1 &'",
   "customizations": {
     "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "ms-python.vscode-pylance",
-        "rust-lang.rust-analyzer"
-      ]
+      "extensions": ["ms-python.python", "ms-python.vscode-pylance"]
+    }
+  },
+  "forwardPorts": [5000],
+  "portsAttributes": {
+    "5000": {
+      "label": "Semantic Zip UI",
+      "onAutoForward": "openBrowser"
     }
   },
   "remoteEnv": {
