@@ -1,7 +1,7 @@
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 _COMPRESSOR = None
 
@@ -17,10 +17,9 @@ def _count(text: str) -> int:
     return len(text.split())
 
 def _preprocess(text: str) -> str:
-    """Remove separator lines and excessive blank lines."""
     text = re.sub(r'-{3,}', '', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
-    text = re.sub(r'^\s*[\.\-\*]\s*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*[.\-*]\s*$', '', text, flags=re.MULTILINE)
     return text.strip()
 
 def _get_compressor(model_name: str):
@@ -47,49 +46,53 @@ def compress(
     elif mode == "conservative":
         target_token_rate = 0.7
 
-    # Never compress below 15% — prevents near-empty output
     target_token_rate = max(target_token_rate, 0.15)
-
     clean_text = _preprocess(text)
     original_tokens = _count(clean_text)
 
-    # If text is too short after cleaning, return as-is
     if original_tokens < 20:
-        return LinguaResult(
-            compressed_text=clean_text,
-            original_tokens=original_tokens,
-            compressed_tokens=original_tokens,
-            compression_ratio=1.0,
-            rate=target_token_rate,
-        )
+        return LinguaResult(clean_text, original_tokens, original_tokens, 1.0, target_token_rate)
 
     compressor = _get_compressor(model_name)
-    kwargs = dict(
-        target_token=target_token_rate,
-        force_tokens=["\n", ".", "?", "!"],
-        drop_consecutive=True,
-    )
-    if instruction:
-        kwargs["instruction"] = instruction
-    if question:
-        kwargs["question"] = question
 
-    result = compressor.compress_prompt(clean_text, **kwargs)
-    compressed = result["compressed_prompt"]
+    # Split into paragraphs and pass as context list — correct LLMLingua API format
+    paragraphs = [p.strip() for p in clean_text.split('\n\n') if p.strip() and len(p.split()) > 3]
+    if not paragraphs:
+        paragraphs = [clean_text]
 
-    # Safety net: if output is mostly punctuation/dots, return cleaned original
+    try:
+        result = compressor.compress_prompt(
+            context=paragraphs,
+            instruction=instruction or "",
+            question=question or "What is the main content?",
+            target_token=int(original_tokens * target_token_rate),
+            condition_compare=True,
+            reorder_context="sort",
+            dynamic_context_compression_ratio=0.3,
+        )
+        compressed = result.get("compressed_prompt", "").strip()
+    except Exception:
+        # Fallback to simple call if advanced params not supported
+        try:
+            result = compressor.compress_prompt(
+                context=paragraphs,
+                target_token=int(original_tokens * target_token_rate),
+            )
+            compressed = result.get("compressed_prompt", "").strip()
+        except Exception:
+            compressed = ""
+
+    # Safety net: if output has fewer than 10 real words, return cleaned original
     real_words = [w for w in compressed.split() if re.search(r'[a-zA-Z]{2,}', w)]
-    if len(real_words) < 5:
+    if len(real_words) < 10:
         compressed = clean_text
 
-    origin_tokens     = result.get("origin_tokens", original_tokens)
-    compressed_tokens = result.get("compressed_tokens", _count(compressed))
-
+    compressed_tokens = _count(compressed)
     return LinguaResult(
         compressed_text=compressed,
-        original_tokens=origin_tokens,
+        original_tokens=original_tokens,
         compressed_tokens=compressed_tokens,
-        compression_ratio=round(origin_tokens / max(compressed_tokens, 1), 2),
+        compression_ratio=round(original_tokens / max(compressed_tokens, 1), 2),
         rate=target_token_rate,
     )
 
