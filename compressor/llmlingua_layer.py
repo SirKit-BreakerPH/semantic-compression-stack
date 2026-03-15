@@ -1,19 +1,9 @@
-"""
-Layer 2 — Semantic Token Pruning (LLMLingua)
---------------------------------------------
-Uses Microsoft's LLMLingua to remove low-information tokens while
-preserving semantic meaning. Supports both LLMLingua and LLMLingua-2.
-
-Typical compression: 2–5× with <5% semantic loss.
-"""
-
 from __future__ import annotations
-import os
+import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
 
-_COMPRESSOR = None  # lazy-loaded singleton
-
+_COMPRESSOR = None
 
 @dataclass
 class LinguaResult:
@@ -21,25 +11,28 @@ class LinguaResult:
     original_tokens: int
     compressed_tokens: int
     compression_ratio: float
-    rate: float  # target rate used
+    rate: float
 
+def _count(text: str) -> int:
+    return len(text.split())
+
+def _preprocess(text: str) -> str:
+    """Remove separator lines and excessive blank lines."""
+    text = re.sub(r'-{3,}', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'^\s*[\.\-\*]\s*$', '', text, flags=re.MULTILINE)
+    return text.strip()
 
 def _get_compressor(model_name: str):
     global _COMPRESSOR
     if _COMPRESSOR is None:
-        try:
-            from llmlingua import PromptCompressor
-            _COMPRESSOR = PromptCompressor(
-                model_name=model_name,
-                use_llmlingua2=("llmlingua-2" in model_name.lower()),
-                device_map="cpu",
-            )
-        except ImportError:
-            raise ImportError(
-                "llmlingua not installed. Run: pip install llmlingua"
-            )
+        from llmlingua import PromptCompressor
+        _COMPRESSOR = PromptCompressor(
+            model_name=model_name,
+            use_llmlingua2=("llmlingua-2" in model_name.lower()),
+            device_map="cpu",
+        )
     return _COMPRESSOR
-
 
 def compress(
     text: str,
@@ -49,32 +42,31 @@ def compress(
     question: str = "",
     mode: Literal["auto", "aggressive", "conservative"] = "auto",
 ) -> LinguaResult:
-    """
-    Apply LLMLingua semantic compression.
-
-    Args:
-        text:              Input text.
-        target_token_rate: Fraction of tokens to retain (0.1–0.9).
-                           Lower = more aggressive.
-        model_name:        HuggingFace model for perplexity scoring.
-        instruction:       Optional task context (improves preservation).
-        question:          Optional query (preserves relevant tokens).
-        mode:              "auto" uses target_token_rate; "aggressive" = 0.3;
-                           "conservative" = 0.7.
-
-    Returns:
-        LinguaResult with compressed text and stats.
-    """
     if mode == "aggressive":
         target_token_rate = 0.3
     elif mode == "conservative":
         target_token_rate = 0.7
 
-    compressor = _get_compressor(model_name)
+    # Never compress below 15% — prevents near-empty output
+    target_token_rate = max(target_token_rate, 0.15)
 
-    kwargs: dict = dict(
+    clean_text = _preprocess(text)
+    original_tokens = _count(clean_text)
+
+    # If text is too short after cleaning, return as-is
+    if original_tokens < 20:
+        return LinguaResult(
+            compressed_text=clean_text,
+            original_tokens=original_tokens,
+            compressed_tokens=original_tokens,
+            compression_ratio=1.0,
+            rate=target_token_rate,
+        )
+
+    compressor = _get_compressor(model_name)
+    kwargs = dict(
         target_token=target_token_rate,
-        force_tokens=["\n", ".", "?", "!"],      # preserve sentence structure
+        force_tokens=["\n", ".", "?", "!"],
         drop_consecutive=True,
     )
     if instruction:
@@ -82,12 +74,16 @@ def compress(
     if question:
         kwargs["question"] = question
 
-    text = preprocess(text)
-    result = compressor.compress_prompt(text, **kwargs)
-
+    result = compressor.compress_prompt(clean_text, **kwargs)
     compressed = result["compressed_prompt"]
-    origin_tokens = result.get("origin_tokens", len(text.split()))
-    compressed_tokens = result.get("compressed_tokens", len(compressed.split()))
+
+    # Safety net: if output is mostly punctuation/dots, return cleaned original
+    real_words = [w for w in compressed.split() if re.search(r'[a-zA-Z]{2,}', w)]
+    if len(real_words) < 5:
+        compressed = clean_text
+
+    origin_tokens     = result.get("origin_tokens", original_tokens)
+    compressed_tokens = result.get("compressed_tokens", _count(compressed))
 
     return LinguaResult(
         compressed_text=compressed,
@@ -97,22 +93,8 @@ def compress(
         rate=target_token_rate,
     )
 
-
 def decompress_hint(compressed: str) -> str:
-    """
-    LLMLingua compression is not directly reversible.
-    Returns a hint string for the LLM reconstruction layer.
-    """
     return (
         "The following text was semantically compressed by LLMLingua. "
-        "Reconstruct the full, natural-language version, inferring implied "
-        "words and grammatical connectors:\n\n" + compressed
+        "Reconstruct the full natural-language version:\n\n" + compressed
     )
-
-
-def preprocess(text: str) -> str:
-    """Remove separator lines and blank noise before compression."""
-    import re
-    text = re.sub(r'-{3,}', '', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
