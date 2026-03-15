@@ -213,3 +213,22 @@ def restore_hint(pruned: str) -> str:
         "The following text had low-importance sentences removed. "
         "Expand it back into fluent, complete prose:\n\n" + pruned
     )
+
+
+def prune_safe(text: str, keep_ratio: float = 0.6, min_sentences: int = 3) -> "PruningResult":
+    """Prune with a minimum sentence guarantee — never returns empty output."""
+    result = prune(text, keep_ratio=keep_ratio)
+    if not result.pruned_text.strip() or result.pruned_tokens < min_sentences:
+        # Fall back to keeping first N sentences of original
+        import re
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text.strip()) if s.strip()]
+        kept = " ".join(sentences[:max(min_sentences, int(len(sentences) * keep_ratio))])
+        tokens = _count_tokens(kept)
+        return PruningResult(
+            pruned_text=kept,
+            original_tokens=result.original_tokens,
+            pruned_tokens=tokens,
+            compression_ratio=round(result.original_tokens / max(tokens, 1), 2),
+            removed_sentences=len(sentences) - max(min_sentences, int(len(sentences) * keep_ratio)),
+        )
+    return result

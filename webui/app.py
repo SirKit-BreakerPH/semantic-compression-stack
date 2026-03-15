@@ -17,7 +17,7 @@ from flask_cors import CORS
 import io
 
 from structure.skeleton_layer import skeletonize
-from compressor.token_pruning_layer import prune
+from compressor.token_pruning_layer import prune, prune_safe as prune
 from compressor.abstractive_layer import (
     compress as abstractive_compress,
     reconstruct as abstractive_reconstruct,
