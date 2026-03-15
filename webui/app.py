@@ -1,18 +1,5 @@
 """
 webui/app.py — Flask Web Server for Semantic Compression Stack
---------------------------------------------------------------
-Serves the web UI and exposes a REST API that the frontend calls.
-
-Usage:
-    python webui/app.py                        # default: port 5000
-    python webui/app.py --port 8080
-    python webui/app.py --host 0.0.0.0 --port 5000  # expose to network
-
-Environment variables (all optional):
-    GROQ_API_KEY    — enables Layer 5 via Groq (free tier)
-    GEMINI_API_KEY  — enables Layer 5 via Gemini (free tier)
-    SECRET_KEY      — Flask session secret (auto-generated if not set)
-    ALLOWED_ORIGINS — comma-separated allowed iFrame origins (default: *)
 """
 
 from __future__ import annotations
@@ -20,15 +7,14 @@ import argparse
 import os
 import sys
 import time
-import json
 from pathlib import Path
 
-# Add project root to path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from flask import Flask, jsonify, render_template, request, Response
+from flask import Flask, jsonify, render_template, request, Response, send_file
 from flask_cors import CORS
+import io
 
 from structure.skeleton_layer import skeletonize
 from compressor.token_pruning_layer import prune
@@ -55,11 +41,11 @@ except ImportError:
 # ── App setup ──────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = os.getenv("SECRET_KEY", os.urandom(24).hex())
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB upload limit
 
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*")
-CORS(app, origins=allowed_origins, supports_credentials=False)
+CORS(app, origins=os.getenv("ALLOWED_ORIGINS", "*"), supports_credentials=False)
 
-# Allow iFrame embedding (remove X-Frame-Options restriction)
+
 @app.after_request
 def allow_iframe(response: Response) -> Response:
     response.headers.pop("X-Frame-Options", None)
@@ -67,7 +53,6 @@ def allow_iframe(response: Response) -> Response:
     return response
 
 
-# ── Token counter ──────────────────────────────────────────────────────────
 def _tokens(text: str) -> int:
     try:
         import tiktoken
@@ -85,42 +70,71 @@ def index():
 
 @app.route("/api/status")
 def status():
-    """Return which backends and layers are available."""
     return jsonify({
         "layers": {
             "1": {"name": "Structural Skeleton", "available": True,  "requires": "none"},
             "2": {"name": "LLMLingua Pruning",   "available": _LINGUA, "requires": "pip install llmlingua"},
             "3": {"name": "Importance Filter",   "available": True,  "requires": "none"},
             "4": {"name": "Embedding Compress",  "available": _EMBED, "requires": "pip install sentence-transformers faiss-cpu"},
-            "5": {"name": "Abstractive LLM",     "available": True,  "requires": "GROQ_API_KEY or GEMINI_API_KEY (optional)"},
+            "5": {"name": "Abstractive LLM",     "available": True,  "requires": "GROQ_API_KEY or GEMINI_API_KEY"},
         },
         "backends": {
             "groq":   {"available": bool(os.getenv("GROQ_API_KEY")),   "model": GROQ_DEFAULT_MODEL},
             "gemini": {"available": bool(os.getenv("GEMINI_API_KEY")), "model": GEMINI_DEFAULT_MODEL},
-            "local":  {"available": True, "model": "bart-large-cnn (needs ~1.5GB download on first use)"},
+            "local":  {"available": True, "model": "bart-large-cnn"},
         },
     })
 
 
+# ── File upload ────────────────────────────────────────────────────────────
+@app.route("/api/upload", methods=["POST"])
+def upload_file():
+    """Accept a text file and return its content."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "Empty filename"}), 400
+
+    allowed = {".txt", ".md", ".py", ".js", ".ts", ".json", ".csv", ".html", ".yaml", ".yml"}
+    ext = Path(f.filename).suffix.lower()
+    if ext not in allowed:
+        return jsonify({"error": f"Type '{ext}' not supported. Use: {', '.join(sorted(allowed))}"}), 400
+
+    try:
+        text = f.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return jsonify({"error": f"Could not read file: {e}"}), 400
+
+    return jsonify({
+        "text": text,
+        "filename": f.filename,
+        "tokens": _tokens(text),
+        "chars": len(text),
+    })
+
+
+# ── File download ──────────────────────────────────────────────────────────
+@app.route("/api/download", methods=["POST"])
+def download_file():
+    """Return text as a downloadable file."""
+    body     = request.get_json(force=True)
+    text     = body.get("text", "")
+    filename = body.get("filename", "output.txt")
+    buf = io.BytesIO(text.encode("utf-8"))
+    buf.seek(0)
+    return send_file(buf, mimetype="text/plain", as_attachment=True, download_name=filename)
+
+
+# ── Compress ───────────────────────────────────────────────────────────────
 @app.route("/api/compress", methods=["POST"])
 def compress_endpoint():
-    """
-    POST /api/compress
-    Body (JSON):
-        text        : string — input text
-        layers      : list[int] — e.g. [1, 2, 3]
-        mode        : "conservative" | "balanced" | "aggressive"
-        backend     : "auto" | "groq" | "gemini" | "hf"
-        groq_key    : string (optional, overrides env)
-        gemini_key  : string (optional, overrides env)
-    """
-    body = request.get_json(force=True)
-    text      = body.get("text", "").strip()
-    layers    = [int(l) for l in body.get("layers", [1, 3])]
-    mode      = body.get("mode", "balanced")
-    backend   = body.get("backend", "auto")
+    body    = request.get_json(force=True)
+    text    = body.get("text", "").strip()
+    layers  = [int(l) for l in body.get("layers", [1, 3])]
+    mode    = body.get("mode", "balanced")
+    backend = body.get("backend", "auto")
 
-    # Allow keys passed from UI (store in env for this request only)
     if body.get("groq_key"):
         os.environ["GROQ_API_KEY"] = body["groq_key"]
     if body.get("gemini_key"):
@@ -138,9 +152,9 @@ def compress_endpoint():
     ratio_map  = {"conservative": 0.50, "balanced": 0.35, "aggressive": 0.20}
     lingua_map = {"conservative": 0.70, "balanced": 0.50, "aggressive": 0.30}
 
-    try:
-        # Layer 1
-        if 1 in layers:
+    # Layer 1
+    if 1 in layers:
+        try:
             t = time.perf_counter()
             r = skeletonize(current)
             current = r.skeleton
@@ -150,13 +164,17 @@ def compress_endpoint():
                 "ratio": r.compression_ratio, "content_type": r.content_type,
                 "ms": round((time.perf_counter() - t) * 1000),
             })
+        except Exception as e:
+            layer_stats.append({"layer": 1, "name": "Structural Skeleton",
+                                 "skipped": True, "reason": str(e)[:150]})
 
-        # Layer 2
-        if 2 in layers:
-            if not _LINGUA:
-                layer_stats.append({"layer": 2, "name": "LLMLingua", "skipped": True,
-                                    "reason": "not installed — run: pip install llmlingua"})
-            else:
+    # Layer 2
+    if 2 in layers:
+        if not _LINGUA:
+            layer_stats.append({"layer": 2, "name": "LLMLingua", "skipped": True,
+                                 "reason": "not installed — pip install llmlingua"})
+        else:
+            try:
                 t = time.perf_counter()
                 r = lingua_compress(current, target_token_rate=lingua_map[mode])
                 current = r.compressed_text
@@ -166,9 +184,13 @@ def compress_endpoint():
                     "ratio": r.compression_ratio,
                     "ms": round((time.perf_counter() - t) * 1000),
                 })
+            except Exception as e:
+                layer_stats.append({"layer": 2, "name": "LLMLingua",
+                                     "skipped": True, "reason": str(e)[:150]})
 
-        # Layer 3
-        if 3 in layers:
+    # Layer 3
+    if 3 in layers:
+        try:
             t = time.perf_counter()
             r = prune(current, keep_ratio=keep_map[mode])
             current = r.pruned_text
@@ -178,15 +200,19 @@ def compress_endpoint():
                 "ratio": r.compression_ratio, "removed": r.removed_sentences,
                 "ms": round((time.perf_counter() - t) * 1000),
             })
+        except Exception as e:
+            layer_stats.append({"layer": 3, "name": "Importance Filter",
+                                 "skipped": True, "reason": str(e)[:150]})
 
-        # Layer 4
-        if 4 in layers:
-            if not _EMBED:
-                layer_stats.append({"layer": 4, "name": "Embedding", "skipped": True,
-                                    "reason": "not installed — run: pip install sentence-transformers faiss-cpu"})
-            else:
+    # Layer 4 — wrapped individually, non-fatal on error
+    if 4 in layers:
+        if not _EMBED:
+            layer_stats.append({"layer": 4, "name": "Embedding Compress", "skipped": True,
+                                 "reason": "not installed — pip install sentence-transformers faiss-cpu"})
+        else:
+            try:
                 t = time.perf_counter()
-                packet = embed_encode(current)
+                packet  = embed_encode(current)
                 current = embed_decode(packet)
                 layer_stats.append({
                     "layer": 4, "name": "Embedding Compress",
@@ -194,9 +220,13 @@ def compress_endpoint():
                     "embed_shape": list(packet.embeddings.shape),
                     "ms": round((time.perf_counter() - t) * 1000),
                 })
+            except Exception as e:
+                layer_stats.append({"layer": 4, "name": "Embedding Compress",
+                                     "skipped": True, "reason": str(e)[:150]})
 
-        # Layer 5
-        if 5 in layers:
+    # Layer 5
+    if 5 in layers:
+        try:
             t = time.perf_counter()
             r = abstractive_compress(current, target_ratio=ratio_map[mode], backend=backend)
             current = r.output_text
@@ -206,9 +236,9 @@ def compress_endpoint():
                 "ratio": r.compression_ratio, "model": r.model_used, "backend": r.backend,
                 "ms": round((time.perf_counter() - t) * 1000),
             })
-
-    except Exception as exc:
-        return jsonify({"error": str(exc), "layer_stats": layer_stats}), 500
+        except Exception as e:
+            layer_stats.append({"layer": 5, "name": "Abstractive LLM",
+                                 "skipped": True, "reason": str(e)[:200]})
 
     final_tokens = _tokens(current)
     return jsonify({
@@ -216,23 +246,16 @@ def compress_endpoint():
         "original_tokens": original_tokens,
         "final_tokens": final_tokens,
         "total_ratio": round(original_tokens / max(final_tokens, 1), 2),
-        "saved_pct": round((1 - final_tokens / original_tokens) * 100, 1),
+        "saved_pct": round((1 - final_tokens / max(original_tokens, 1)) * 100, 1),
         "total_ms": round((time.perf_counter() - t_total) * 1000),
         "layer_stats": layer_stats,
     })
 
 
+# ── Decompress ─────────────────────────────────────────────────────────────
 @app.route("/api/decompress", methods=["POST"])
 def decompress_endpoint():
-    """
-    POST /api/decompress
-    Body (JSON):
-        text      : string — compressed text
-        backend   : "auto" | "groq" | "gemini" | "hf"
-        groq_key  : string (optional)
-        gemini_key: string (optional)
-    """
-    body = request.get_json(force=True)
+    body    = request.get_json(force=True)
     text    = body.get("text", "").strip()
     backend = body.get("backend", "auto")
 
@@ -248,10 +271,7 @@ def decompress_endpoint():
     try:
         result = abstractive_reconstruct(
             compressed=text,
-            reconstruction_hints=[
-                "Text was processed through structural skeletonization, "
-                "importance filtering, and possible abstractive compression.",
-            ],
+            reconstruction_hints=["Text passed through structural + importance compression."],
             backend=backend,
         )
     except Exception as exc:
@@ -268,9 +288,9 @@ def decompress_endpoint():
     })
 
 
+# ── Benchmark ──────────────────────────────────────────────────────────────
 @app.route("/api/benchmark", methods=["POST"])
 def benchmark_endpoint():
-    """Quick benchmark across modes for a given text."""
     body = request.get_json(force=True)
     text = body.get("text", "").strip()
     if not text:
@@ -278,23 +298,24 @@ def benchmark_endpoint():
 
     original_tokens = _tokens(text)
     results = []
-
     for mode in ["conservative", "balanced", "aggressive"]:
         keep = {"conservative": 0.75, "balanced": 0.60, "aggressive": 0.40}[mode]
         t = time.perf_counter()
-        r1 = skeletonize(text)
-        r3 = prune(r1.skeleton, keep_ratio=keep)
-        ms = round((time.perf_counter() - t) * 1000)
-        final = _tokens(r3.pruned_text)
-        results.append({
-            "mode": mode,
-            "layers": "1+3",
-            "original_tokens": original_tokens,
-            "final_tokens": final,
-            "ratio": round(original_tokens / max(final, 1), 2),
-            "saved_pct": round((1 - final / original_tokens) * 100, 1),
-            "ms": ms,
-        })
+        try:
+            r1    = skeletonize(text)
+            r3    = prune(r1.skeleton, keep_ratio=keep)
+            ms    = round((time.perf_counter() - t) * 1000)
+            final = _tokens(r3.pruned_text)
+            results.append({
+                "mode": mode, "layers": "1+3",
+                "original_tokens": original_tokens,
+                "final_tokens": final,
+                "ratio": round(original_tokens / max(final, 1), 2),
+                "saved_pct": round((1 - final / max(original_tokens, 1)) * 100, 1),
+                "ms": ms,
+            })
+        except Exception as e:
+            results.append({"mode": mode, "error": str(e)})
 
     return jsonify({"results": results})
 
@@ -308,9 +329,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print(f"\n🌐 Semantic Compression Web UI")
-    print(f"   URL  : http://{args.host}:{args.port}")
-    print(f"   Groq : {'✅ configured' if os.getenv('GROQ_API_KEY') else '⚠️  not set (Layer 5 disabled)'}")
-    print(f"   Gemini: {'✅ configured' if os.getenv('GEMINI_API_KEY') else '⚠️  not set (Layer 5 disabled)'}")
-    print(f"   iFrame: <iframe src=\"http://{args.host}:{args.port}\" ...></iframe>\n")
+    print(f"   URL   : http://{args.host}:{args.port}")
+    print(f"   Groq  : {'✅ configured' if os.getenv('GROQ_API_KEY') else '⚠️  not set'}")
+    print(f"   Gemini: {'✅ configured' if os.getenv('GEMINI_API_KEY') else '⚠️  not set'}")
+    print(f"   Upload: up to 10 MB\n")
 
     app.run(host=args.host, port=args.port, debug=args.debug)
